@@ -32,6 +32,8 @@
     background: transparent; color: inherit; padding: 7px;
   }
   #saved { font-size: 11px; opacity: 0; transition: opacity .2s; }
+  #diag { margin-top: 10px; font-size: 11px; opacity: .45; }
+  #diag.warn { opacity: 1; color: #c62828; font-weight: 600; }
   #saved.show { opacity: .6; }
 </style>
 </head>
@@ -44,6 +46,7 @@
   <textarea id="sites" spellcheck="false"></textarea>
   <button id="save" class="secondary">Save list</button>
   <div id="saved">Saved.</div>
+  <div id="diag"></div>
   <script src="hold.js"></script>
   <script src="popup.js"></script>
 </body>

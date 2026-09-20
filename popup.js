@@ -5,7 +5,18 @@ const unlockBtn = document.getElementById("unlock");
 const blockBtn = document.getElementById("block");
 const IDLE = "Hold 10s to unlock";
 
+function renderDiagnostics(state) {
+  const el = document.getElementById("diag");
+  if (state.version === undefined) return;
+  const problem = state.ruleCount === 0 || state.lastRuleError;
+  el.textContent = problem
+    ? `⚠ v${state.version} — blocking rule not installed${state.lastRuleError ? `: ${state.lastRuleError}` : ""}`
+    : `v${state.version} · ${state.ruleCount} rule${state.ruleCount === 1 ? "" : "s"} active`;
+  el.classList.toggle("warn", Boolean(problem));
+}
+
 function render(state) {
+  renderDiagnostics(state);
   const left = (state.unlockUntil || 0) - Date.now();
   statusEl.textContent = left > 0
     ? `Unlocked — ${Math.ceil(left / 60000)} min left.`

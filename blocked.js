@@ -31,7 +31,14 @@ const hold = attachHold(btn, {
       note.textContent = "Something went wrong — try again.";
       return;
     }
-    if (/^https?:/.test(original)) location.replace(original);
-    else location.replace(`https://${hostEl.textContent}`);
+    if (/^https?:/.test(original)) {
+      location.replace(original);
+      return;
+    }
+    // Fallback rules don't carry the original URL; offer the sites instead.
+    const state = await chrome.runtime.sendMessage({ type: "status" });
+    btn.remove();
+    note.innerHTML = "Unlocked. Continue to: " + (state.sites || [])
+      .map((h) => `<a href="https://${h}/">${h}</a>`).join(" · ");
   }
 });

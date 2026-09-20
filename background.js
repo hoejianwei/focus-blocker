@@ -7,6 +7,7 @@
 
 const BLOCK_RULE_ID = 1;
 const ALLOW_RULE_ID = 2;
+const FALLBACK_IDS = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
 const TICK_ALARM = "tick";
 const REBLOCK_ALARM = "reblock";
 const DEFAULT_SITES = ["instagram.com", "youtube.com"];
@@ -41,19 +42,38 @@ function blockPageFor(url) {
   return chrome.runtime.getURL(`blocked.html?url=${url}`);
 }
 
-// Always-on: send blocked sites to the block page.
+// Always-on: send blocked sites to the block page. Falls back to plain
+// urlFilter rules if the regex form is ever rejected, and records why.
 async function installBlockRule() {
   const page = chrome.runtime.getURL("blocked.html");
-  await chrome.declarativeNetRequest.updateDynamicRules({
-    removeRuleIds: [BLOCK_RULE_ID],
-    addRules: [{
-      id: BLOCK_RULE_ID,
+  const ids = [BLOCK_RULE_ID, ...FALLBACK_IDS];
+  const regexRule = {
+    id: BLOCK_RULE_ID,
+    priority: 1,
+    // \0 is the whole matched URL, handed to the block page so we can return to it.
+    action: { type: "redirect", redirect: { regexSubstitution: `${page}?url=\\0` } },
+    condition: { regexFilter: await sitePattern(), resourceTypes: ["main_frame"] }
+  };
+  try {
+    await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: ids, addRules: [regexRule] });
+    await chrome.storage.local.set({ lastRuleError: null });
+  } catch (err) {
+    console.error("[Focus Blocker] regex rule rejected:", err);
+    const sites = await getSites();
+    const simple = sites.slice(0, FALLBACK_IDS.length).map((host, i) => ({
+      id: FALLBACK_IDS[i],
       priority: 1,
-      // \0 is the whole matched URL, handed to the block page so we can return to it.
-      action: { type: "redirect", redirect: { regexSubstitution: `${page}?url=\\0` } },
-      condition: { regexFilter: await sitePattern(), resourceTypes: ["main_frame"] }
-    }]
-  });
+      action: { type: "redirect", redirect: { extensionPath: "/blocked.html" } },
+      condition: { urlFilter: `||${host}`, resourceTypes: ["main_frame"] }
+    }));
+    try {
+      await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: ids, addRules: simple });
+      await chrome.storage.local.set({ lastRuleError: `regex rejected (${err.message}); using simple rules` });
+    } catch (err2) {
+      console.error("[Focus Blocker] all network rules failed:", err2);
+      await chrome.storage.local.set({ lastRuleError: `network rules failed: ${err2.message}` });
+    }
+  }
 }
 
 // The pass: exempt exactly one tab. tabId null tears the exemption down.
@@ -176,7 +196,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case "status": {
         await sync(); // opening the popup repairs a missing rule
         const { unlockUntil } = await getState();
-        sendResponse({ ok: true, unlockUntil, sites: await getSites(), minutes: DEFAULT_MINUTES });
+        const { lastRuleError } = await chrome.storage.local.get("lastRuleError");
+        sendResponse({
+          ok: true,
+          unlockUntil,
+          sites: await getSites(),
+          minutes: DEFAULT_MINUTES,
+          version: chrome.runtime.getManifest().version,
+          ruleCount: (await chrome.declarativeNetRequest.getDynamicRules()).length,
+          lastRuleError: lastRuleError || null
+        });
         break;
       }
       case "setSites": {
