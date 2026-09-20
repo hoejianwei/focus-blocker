@@ -32,6 +32,15 @@ async function sitePattern() {
   return `^https?://([a-z0-9-]+\\.)*(${hosts})/.*`;
 }
 
+async function isBlockedUrl(url) {
+  const hosts = (await getSites()).map(escapeRe).join("|");
+  return new RegExp(`^https?://([a-z0-9-]+\\.)*(${hosts})/`).test(url);
+}
+
+function blockPageFor(url) {
+  return chrome.runtime.getURL(`blocked.html?url=${url}`);
+}
+
 // Always-on: send blocked sites to the block page.
 async function installBlockRule() {
   const page = chrome.runtime.getURL("blocked.html");
@@ -118,6 +127,21 @@ chrome.runtime.onInstalled.addListener(sync);
 // A new browser session: session rules are already gone, so start clean.
 chrome.runtime.onStartup.addListener(() => block({ reloadPassTab: false }));
 
+// Run on EVERY service-worker start. Reloading an unpacked extension does not
+// reliably fire onInstalled, so relying on it alone can leave the rule missing
+// and everything permanently unblocked.
+sync();
+
+// Belt and braces: enforce in the tabs API too, so a missing or mis-applied
+// network rule can't silently unblock anything.
+chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
+  const url = info.url || tab.url;
+  if (!url || !(await isBlockedUrl(url))) return;
+  const { unlockUntil, passTabId } = await getState();
+  if (unlockUntil > Date.now() && tabId === passTabId) return;
+  chrome.tabs.update(tabId, { url: blockPageFor(url) }).catch(() => {});
+});
+
 // Closing the tab ends the pass.
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   const { unlockUntil, passTabId } = await getState();
@@ -150,6 +174,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: true, unlockUntil: 0 });
         break;
       case "status": {
+        await sync(); // opening the popup repairs a missing rule
         const { unlockUntil } = await getState();
         sendResponse({ ok: true, unlockUntil, sites: await getSites(), minutes: DEFAULT_MINUTES });
         break;

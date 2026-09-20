@@ -1,13 +1,32 @@
 {
   "manifest_version": 3,
   "name": "Focus Blocker",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Blocks Instagram and YouTube, with a 7-minute pass when you actually need them.",
-  "permissions": ["declarativeNetRequest", "storage", "alarms", "tabs"],
-  "host_permissions": ["<all_urls>"],
-  "background": { "service_worker": "background.js" },
-  "action": { "default_popup": "popup.html", "default_title": "Focus Blocker" },
+  "permissions": [
+    "declarativeNetRequest",
+    "storage",
+    "alarms",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Focus Blocker"
+  },
   "web_accessible_resources": [
-    { "resources": ["blocked.html"], "matches": ["<all_urls>"] }
+    {
+      "resources": [
+        "blocked.html"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
   ]
 }

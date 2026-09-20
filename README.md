@@ -49,7 +49,13 @@ Reload the extension in `chrome://extensions` after editing.
 
 A pass never removes that rule. It adds a higher-priority **session** rule with an `allow` action and a `tabIds` condition naming the single tab that earned the pass. Everything else keeps hitting the redirect. The exemption comes down when the `chrome.alarms` timer fires or when that tab is closed (`tabs.onRemoved`), whichever is first, and session rules are dropped by Chrome at browser restart anyway.
 
-Scoping the exemption instead of lifting the block is what makes this hard to get wrong: there is no window in which the whole browser is unblocked, so a missed event or a sleeping service worker can at worst leave one already-closed tab exempt. The service worker re-asserts the correct state on startup and whenever it wakes.
+Scoping the exemption instead of lifting the block is what makes this hard to get wrong: there is no window in which the whole browser is unblocked, so a missed event or a sleeping service worker can at worst leave one already-closed tab exempt.
+
+Two further safeguards, both learned the hard way: the rule is re-installed on **every** service-worker start rather than only from `onInstalled`, because reloading an unpacked extension does not reliably fire that event — and a version that only reinstalled on install could be left with no rule at all, silently unblocked forever. And a `tabs.onUpdated` listener independently redirects any non-exempt tab that lands on a blocked site, so the extension does not depend on the network rule alone being correct.
+
+### If something ever gets through
+
+Open the popup — that re-installs the rule on the spot. To look closer, go to `chrome://extensions`, click **service worker** under Focus Blocker, and run `await chrome.declarativeNetRequest.getDynamicRules()` in the console; you should see one redirect rule. The service worker re-asserts the correct state on startup and whenever it wakes.
 
 ## Honest limitations
 
