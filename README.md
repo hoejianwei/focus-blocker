@@ -22,7 +22,26 @@ Chrome doesn't allow installing extensions from a URL, so you load the folder di
 4. Click **Load unpacked** and select the `focus-blocker` folder (the one containing `manifest.json`).
 5. Pin it: click the puzzle-piece icon in the toolbar → pin **Focus Blocker**, so you can see the countdown badge.
 
-Blocking starts immediately. To update later: `git pull` in the folder, then hit the refresh icon on the extension's card in `chrome://extensions`.
+Blocking starts immediately.
+
+## Updating — read this, it's the one real trap
+
+After changing the files (`git pull`, or editing them yourself), **Chrome will keep running the old version until you explicitly reload the extension**:
+
+> `chrome://extensions` → the **Focus Blocker** card → click the **circular refresh arrow on the card itself**.
+
+That's the card's own arrow, not the browser's page-reload button.
+
+Two things that look like they should work but don't:
+
+- **Closing the Chrome window is not quitting Chrome.** On macOS the process keeps running in the dock, so reopening a window reloads nothing. A real restart is **⌘Q**, then launch again.
+- Quitting and relaunching only helps if it was a genuine quit. When in doubt, use the refresh arrow — it always works.
+
+A stale build is easy to mistake for a broken one: the extension sits there looking installed while enforcing an older version's behaviour, or, if the old version happened to have its rule lifted for a pass, enforcing nothing at all.
+
+**Confirm the update landed** two ways:
+- The version on the extension card matches the `version` in `manifest.json`.
+- The popup's bottom line reads `v<version> · 1 rule active`.
 
 ## Using it
 
@@ -53,9 +72,37 @@ Scoping the exemption instead of lifting the block is what makes this hard to ge
 
 Two further safeguards, both learned the hard way: the rule is re-installed on **every** service-worker start rather than only from `onInstalled`, because reloading an unpacked extension does not reliably fire that event — and a version that only reinstalled on install could be left with no rule at all, silently unblocked forever. And a `tabs.onUpdated` listener independently redirects any non-exempt tab that lands on a blocked site, so the extension does not depend on the network rule alone being correct.
 
-### If something ever gets through
+## Troubleshooting
 
-Open the popup — that re-installs the rule on the spot. To look closer, go to `chrome://extensions`, click **service worker** under Focus Blocker, and run `await chrome.declarativeNetRequest.getDynamicRules()` in the console; you should see one redirect rule. The service worker re-asserts the correct state on startup and whenever it wakes.
+**Check the popup first.** Its bottom line is the health indicator:
+
+| Line | Meaning |
+|---|---|
+| `v1.2.0 · 1 rule active` | Working normally. |
+| `⚠ … blocking rule not installed` | No rule is live. Opening the popup already tried to repair it — close and reopen the popup to see if it cleared. |
+| Version older than `manifest.json` | A stale build. Reload it with the card's refresh arrow (see **Updating**). |
+
+**A blocked site loads anyway.** Almost always a stale build — check the version first. Opening the popup reinstalls the rule, so try that before digging further.
+
+**Looking closer.** `chrome://extensions` → **service worker** under Focus Blocker → in that console:
+
+```js
+chrome.runtime.getManifest().version                        // which build is actually running
+await chrome.declarativeNetRequest.getDynamicRules()        // expect one redirect rule
+await chrome.declarativeNetRequest.getSessionRules()        // the allow rule, only during a pass
+await chrome.storage.local.get()                            // unlockUntil, passTabId, lastRuleError
+```
+
+An empty array from `getDynamicRules()` means nothing is being blocked at the network layer. Any rule-installation failure is logged there and kept in `lastRuleError`.
+
+**Checking from outside Chrome.** Chrome records the running registration in its profile data, which is the ground truth about which build is loaded:
+
+```sh
+python3 -c "import json;d=json.load(open('$HOME/Library/Application Support/Google/Chrome/Default/Secure Preferences'));
+print([(v.get('service_worker_registration_info'),v.get('serviceworkerevents')) for v in d['extensions']['settings'].values() if 'focus-blocker' in str(v.get('path',''))])"
+```
+
+If the version there is behind `manifest.json`, Chrome has not re-read the folder — reload the extension. The service worker re-asserts the correct state on startup and whenever it wakes.
 
 ## Honest limitations
 
