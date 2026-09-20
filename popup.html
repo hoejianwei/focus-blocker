@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    width: 260px; margin: 0; padding: 16px;
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: #f6f5f3; color: #1c1b19;
+  }
+  @media (prefers-color-scheme: dark) { body { background: #16181c; color: #e9e8e6; } }
+  h2 { font-size: 14px; margin: 0 0 4px; }
+  #status { margin: 0 0 12px; opacity: .7; }
+  button {
+    width: 100%; font: inherit; font-weight: 600; cursor: pointer;
+    padding: 9px; border-radius: 9px; border: 1px solid transparent;
+    background: #2f6fed; color: #fff; margin-bottom: 8px;
+  }
+  button.hold {
+    --progress: 0%;
+    user-select: none; -webkit-user-select: none;
+    background-image: linear-gradient(to right,
+      rgba(255,255,255,.3) var(--progress), transparent var(--progress));
+  }
+  button.secondary { background: transparent; border-color: currentColor; color: inherit; opacity: .75; }
+  label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .5; margin: 12px 0 5px; }
+  textarea {
+    width: 100%; box-sizing: border-box; min-height: 64px; resize: vertical;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    border-radius: 8px; border: 1px solid rgba(128,128,128,.4);
+    background: transparent; color: inherit; padding: 7px;
+  }
+  #saved { font-size: 11px; opacity: 0; transition: opacity .2s; }
+  #saved.show { opacity: .6; }
+</style>
+</head>
+<body>
+  <h2>Focus Blocker</h2>
+  <p id="status">…</p>
+  <button id="unlock">Hold 10s to unlock</button>
+  <button id="block" class="secondary">Block now</button>
+  <label for="sites">Blocked sites</label>
+  <textarea id="sites" spellcheck="false"></textarea>
+  <button id="save" class="secondary">Save list</button>
+  <div id="saved">Saved.</div>
+  <script src="hold.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
