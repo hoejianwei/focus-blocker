@@ -4,7 +4,7 @@ const RULE_ID = 1;
 const TICK_ALARM = "tick";
 const REBLOCK_ALARM = "reblock";
 const DEFAULT_SITES = ["instagram.com", "youtube.com"];
-const DEFAULT_MINUTES = 15;
+const DEFAULT_MINUTES = 7;
 
 async function getSites() {
   const { sites } = await chrome.storage.local.get("sites");
@@ -14,6 +14,12 @@ async function getSites() {
 async function getUnlockUntil() {
   const { unlockUntil } = await chrome.storage.local.get("unlockUntil");
   return typeof unlockUntil === "number" ? unlockUntil : 0;
+}
+
+// Tabs the current pass is tied to. When the last one closes, the pass is over.
+async function getPassTabs() {
+  const { passTabs } = await chrome.storage.local.get("passTabs");
+  return Array.isArray(passTabs) ? passTabs : [];
 }
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -43,17 +49,25 @@ async function applyBlocking(enabled) {
   });
 }
 
+async function isBlockedUrl(url) {
+  const hosts = (await getSites()).map(escapeRe).join("|");
+  return new RegExp(`^https?://([a-z0-9-]+\\.)*(${hosts})/`).test(url);
+}
+
 async function block({ reloadOpenTabs = true } = {}) {
-  await chrome.storage.local.set({ unlockUntil: 0 });
+  await chrome.storage.local.set({ unlockUntil: 0, passTabs: [] });
   await chrome.alarms.clear(REBLOCK_ALARM);
   await applyBlocking(true);
   await updateBadge();
   if (reloadOpenTabs) await bounceOpenTabs();
 }
 
-async function unlock(minutes = DEFAULT_MINUTES) {
+async function unlock(minutes = DEFAULT_MINUTES, tabId = null) {
   const until = Date.now() + minutes * 60_000;
-  await chrome.storage.local.set({ unlockUntil: until });
+  await chrome.storage.local.set({
+    unlockUntil: until,
+    passTabs: tabId == null ? [] : [tabId]
+  });
   await applyBlocking(false);
   await chrome.alarms.create(REBLOCK_ALARM, { when: until });
   await chrome.alarms.create(TICK_ALARM, { periodInMinutes: 1 });
@@ -98,18 +112,43 @@ async function sync() {
 }
 
 chrome.runtime.onInstalled.addListener(sync);
-chrome.runtime.onStartup.addListener(sync);
+chrome.runtime.onStartup.addListener(() => block({ reloadOpenTabs: false }));
+
+// Any tab that visits a blocked site during a pass joins the pass.
+chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
+  const url = info.url || tab.url;
+  if (!url || (await getUnlockUntil()) <= Date.now()) return;
+  if (!(await isBlockedUrl(url))) return;
+  const tabs = await getPassTabs();
+  if (!tabs.includes(tabId)) await chrome.storage.local.set({ passTabs: [...tabs, tabId] });
+});
+
+// Closing the last tab of the pass ends it early — a new tab is blocked again.
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  if ((await getUnlockUntil()) <= Date.now()) return;
+  const tabs = await getPassTabs();
+  if (!tabs.includes(tabId)) return;
+  const remaining = tabs.filter((id) => id !== tabId);
+  if (remaining.length) await chrome.storage.local.set({ passTabs: remaining });
+  else await block();
+});
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === REBLOCK_ALARM) await block();
   if (alarm.name === TICK_ALARM) await updateBadge();
 });
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     switch (msg?.type) {
       case "unlock": {
-        const until = await unlock(msg.minutes || DEFAULT_MINUTES);
+        // The block page unlocks its own tab; the popup unlocks the active one.
+        let tabId = sender.tab?.id;
+        if (tabId == null) {
+          const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+          tabId = active?.id;
+        }
+        const until = await unlock(msg.minutes || DEFAULT_MINUTES, tabId ?? null);
         sendResponse({ ok: true, unlockUntil: until });
         break;
       }

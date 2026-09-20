@@ -25,7 +25,7 @@ const hold = attachHold(unlockBtn, {
   idleLabel: IDLE,
   holdLabel: "Keep holding…",
   async onComplete() {
-    render(await chrome.runtime.sendMessage({ type: "unlock", minutes: 15 }));
+    render(await chrome.runtime.sendMessage({ type: "unlock", minutes: 7 }));
     hold.reset(IDLE);
   }
 });

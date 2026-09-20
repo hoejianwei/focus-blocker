@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Focus Blocker",
   "version": "1.0.0",
-  "description": "Blocks Instagram and YouTube, with a 15-minute pass when you actually need them.",
+  "description": "Blocks Instagram and YouTube, with a 7-minute pass when you actually need them.",
   "permissions": ["declarativeNetRequest", "storage", "alarms", "tabs"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js" },

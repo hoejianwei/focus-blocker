@@ -1,12 +1,13 @@
 # Focus Blocker
 
-A small Chrome extension that blocks Instagram and YouTube — with a **hold-to-confirm 15-minute pass** for when you genuinely need them.
+A small Chrome extension that blocks Instagram and YouTube — with a **hold-to-confirm 7-minute pass** for when you genuinely need them.
 
 - Blocked sites redirect to a local "Not right now." page (subdomains included: `www.`, `m.`, `music.youtube.com`, …).
 - To get through, you **press and hold the button for 10 seconds**. Let go early and nothing happens.
-- The pass lasts 15 minutes. The toolbar badge counts down (`14m`, `13m`…).
-- When it expires the block returns automatically, and any still-open Instagram/YouTube tabs are reloaded back to the block page — so you can't stretch the pass by leaving a tab sitting open.
-- Restarting Chrome mid-pass keeps the remaining minutes rather than resetting them.
+- The pass lasts 7 minutes. The toolbar badge counts down (`6m`, `5m`…).
+- **Closing the tab ends the pass immediately** — open a new Instagram tab and you're blocked again, even with minutes left on the clock.
+- When the 7 minutes expire the block returns automatically, and any still-open tabs on those sites are reloaded back to the block page — so you can't stretch the pass by leaving a tab sitting open.
+- Restarting Chrome ends any pass in progress.
 - Only top-level page loads are blocked, so embedded YouTube players on other sites still work.
 
 ## Install (each computer)
@@ -25,7 +26,7 @@ Blocking starts immediately. To update later: `git pull` in the folder, then hit
 
 ## Using it
 
-**Hitting a blocked site** — you get the block page. Hold the button for 10 seconds to unlock, and you're sent straight on to the page you originally wanted.
+**Hitting a blocked site** — you get the block page. Hold the button for 10 seconds to unlock, and you're sent straight on to the page you originally wanted. The pass belongs to that tab: close it and the block is back, so the way out is simply to close the tab when you're done.
 
 **The toolbar popup** — shows time remaining, lets you start a pass from anywhere (same 10-second hold), end a pass early with **Block now**, and edit the site list.
 
@@ -37,14 +38,14 @@ Both numbers live in the code:
 
 | What | Where |
 |---|---|
-| 15-minute pass length | `DEFAULT_MINUTES` in `background.js` |
+| 7-minute pass length | `DEFAULT_MINUTES` in `background.js` |
 | 10-second hold | `seconds: 10` in `blocked.js` and `popup.js` |
 
 Reload the extension in `chrome://extensions` after editing.
 
 ## How it works
 
-`background.js` registers one dynamic [declarativeNetRequest](https://developer.chrome.com/docs/extensions/reference/api/declarativeNetRequest) rule that redirects `main_frame` navigations matching the blocked domains to `blocked.html`, passing the original URL along so it can be restored after unlocking. Unlocking removes the rule and sets a `chrome.alarms` timer; the alarm re-adds it. The service worker re-asserts the correct state on startup and whenever it wakes.
+`background.js` registers one dynamic [declarativeNetRequest](https://developer.chrome.com/docs/extensions/reference/api/declarativeNetRequest) rule that redirects `main_frame` navigations matching the blocked domains to `blocked.html`, passing the original URL along so it can be restored after unlocking. Unlocking removes the rule, records the tab the pass belongs to, and sets a `chrome.alarms` timer. The rule comes back when the alarm fires or when the last tab holding the pass is closed (`tabs.onRemoved`), whichever happens first. Tabs that visit a blocked site during a pass join it, so a post opened in a new tab keeps working until you've closed them all. The service worker re-asserts the correct state on startup and whenever it wakes.
 
 ## Honest limitations
 

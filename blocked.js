@@ -6,7 +6,7 @@ try { original = decodeURIComponent(raw); } catch { /* raw was already fine */ }
 const hostEl = document.getElementById("host");
 const btn = document.getElementById("unlock");
 const note = document.getElementById("note");
-const IDLE = "Hold 10s for 15 minutes";
+const IDLE = "Hold 10s for 7 minutes";
 const DEFAULT_NOTE = "The block comes back automatically.";
 
 try {
@@ -24,7 +24,7 @@ const hold = attachHold(btn, {
     btn.disabled = true;
     btn.textContent = "Unlocking…";
     note.textContent = DEFAULT_NOTE;
-    const res = await chrome.runtime.sendMessage({ type: "unlock", minutes: 15 });
+    const res = await chrome.runtime.sendMessage({ type: "unlock", minutes: 7 });
     if (!res?.ok) {
       btn.disabled = false;
       hold.reset(IDLE);
