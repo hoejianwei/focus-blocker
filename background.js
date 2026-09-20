@@ -1,6 +1,12 @@
-// Focus Blocker — blocks a list of sites, with a timed pass.
+// Focus Blocker — blocks a list of sites, with a short pass scoped to one tab.
+//
+// The redirect rule is ALWAYS on. A pass doesn't remove it; it adds a
+// higher-priority session rule that exempts a single tab id. So any other tab —
+// including a brand new one opened during a pass — still gets blocked, and the
+// worst a bookkeeping bug can do is leave one dead tab exempt.
 
-const RULE_ID = 1;
+const BLOCK_RULE_ID = 1;
+const ALLOW_RULE_ID = 2;
 const TICK_ALARM = "tick";
 const REBLOCK_ALARM = "reblock";
 const DEFAULT_SITES = ["instagram.com", "youtube.com"];
@@ -11,86 +17,82 @@ async function getSites() {
   return Array.isArray(sites) && sites.length ? sites : DEFAULT_SITES;
 }
 
-async function getUnlockUntil() {
-  const { unlockUntil } = await chrome.storage.local.get("unlockUntil");
-  return typeof unlockUntil === "number" ? unlockUntil : 0;
-}
-
-// Tabs the current pass is tied to. When the last one closes, the pass is over.
-async function getPassTabs() {
-  const { passTabs } = await chrome.storage.local.get("passTabs");
-  return Array.isArray(passTabs) ? passTabs : [];
+async function getState() {
+  const { unlockUntil, passTabId } = await chrome.storage.local.get(["unlockUntil", "passTabId"]);
+  return {
+    unlockUntil: typeof unlockUntil === "number" ? unlockUntil : 0,
+    passTabId: typeof passTabId === "number" ? passTabId : null
+  };
 }
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-async function buildRules() {
+async function sitePattern() {
   const hosts = (await getSites()).map(escapeRe).join("|");
-  const page = chrome.runtime.getURL("blocked.html");
-  return [{
-    id: RULE_ID,
-    priority: 1,
-    action: {
-      type: "redirect",
-      // \0 is the whole matched URL, handed to the block page so we can return to it.
-      redirect: { regexSubstitution: `${page}?url=\\0` }
-    },
-    condition: {
-      regexFilter: `^https?://([a-z0-9-]+\\.)*(${hosts})/.*`,
-      resourceTypes: ["main_frame"]
-    }
-  }];
+  return `^https?://([a-z0-9-]+\\.)*(${hosts})/.*`;
 }
 
-async function applyBlocking(enabled) {
+// Always-on: send blocked sites to the block page.
+async function installBlockRule() {
+  const page = chrome.runtime.getURL("blocked.html");
   await chrome.declarativeNetRequest.updateDynamicRules({
-    removeRuleIds: [RULE_ID],
-    addRules: enabled ? await buildRules() : []
+    removeRuleIds: [BLOCK_RULE_ID],
+    addRules: [{
+      id: BLOCK_RULE_ID,
+      priority: 1,
+      // \0 is the whole matched URL, handed to the block page so we can return to it.
+      action: { type: "redirect", redirect: { regexSubstitution: `${page}?url=\\0` } },
+      condition: { regexFilter: await sitePattern(), resourceTypes: ["main_frame"] }
+    }]
   });
 }
 
-async function isBlockedUrl(url) {
-  const hosts = (await getSites()).map(escapeRe).join("|");
-  return new RegExp(`^https?://([a-z0-9-]+\\.)*(${hosts})/`).test(url);
+// The pass: exempt exactly one tab. tabId null tears the exemption down.
+async function setExemptTab(tabId) {
+  await chrome.declarativeNetRequest.updateSessionRules({
+    removeRuleIds: [ALLOW_RULE_ID],
+    addRules: tabId == null ? [] : [{
+      id: ALLOW_RULE_ID,
+      priority: 2, // beats the redirect
+      action: { type: "allow" },
+      condition: {
+        regexFilter: await sitePattern(),
+        resourceTypes: ["main_frame"],
+        tabIds: [tabId]
+      }
+    }]
+  });
 }
 
-async function block({ reloadOpenTabs = true } = {}) {
-  await chrome.storage.local.set({ unlockUntil: 0, passTabs: [] });
+async function block({ reloadPassTab = true } = {}) {
+  const { passTabId } = await getState();
+  await chrome.storage.local.set({ unlockUntil: 0, passTabId: null });
   await chrome.alarms.clear(REBLOCK_ALARM);
-  await applyBlocking(true);
+  await setExemptTab(null);
+  await installBlockRule();
   await updateBadge();
-  if (reloadOpenTabs) await bounceOpenTabs();
+  // Kick the formerly-exempt tab back to the block page instead of leaving it sitting there.
+  if (reloadPassTab && passTabId != null) {
+    chrome.tabs.reload(passTabId).catch(() => {});
+  }
 }
 
 async function unlock(minutes = DEFAULT_MINUTES, tabId = null) {
+  if (tabId == null) return null; // a pass has to belong to some tab
   const until = Date.now() + minutes * 60_000;
-  await chrome.storage.local.set({
-    unlockUntil: until,
-    passTabs: tabId == null ? [] : [tabId]
-  });
-  await applyBlocking(false);
+  await chrome.storage.local.set({ unlockUntil: until, passTabId: tabId });
+  await setExemptTab(tabId);
   await chrome.alarms.create(REBLOCK_ALARM, { when: until });
   await chrome.alarms.create(TICK_ALARM, { periodInMinutes: 1 });
   await updateBadge();
   return until;
 }
 
-// When the pass expires, kick any still-open blocked tabs back to the block page.
-async function bounceOpenTabs() {
-  const sites = await getSites();
-  const patterns = sites.flatMap((h) => [`*://${h}/*`, `*://*.${h}/*`]);
-  const tabs = await chrome.tabs.query({ url: patterns });
-  for (const tab of tabs) {
-    if (tab.id != null) chrome.tabs.reload(tab.id).catch(() => {});
-  }
-}
-
 async function updateBadge() {
-  const until = await getUnlockUntil();
-  const left = until - Date.now();
+  const { unlockUntil } = await getState();
+  const left = unlockUntil - Date.now();
   if (left > 0) {
-    const mins = Math.ceil(left / 60_000);
-    await chrome.action.setBadgeText({ text: `${mins}m` });
+    await chrome.action.setBadgeText({ text: `${Math.ceil(left / 60_000)}m` });
     await chrome.action.setBadgeBackgroundColor({ color: "#2e7d32" });
   } else {
     await chrome.action.setBadgeText({ text: "" });
@@ -98,39 +100,30 @@ async function updateBadge() {
   }
 }
 
-// Re-assert the correct state whenever the worker wakes up.
+// Re-assert the correct state when the worker wakes or the extension loads.
 async function sync() {
-  const until = await getUnlockUntil();
-  if (until > Date.now()) {
-    await applyBlocking(false);
-    await chrome.alarms.create(REBLOCK_ALARM, { when: until });
+  await installBlockRule();
+  const { unlockUntil, passTabId } = await getState();
+  if (unlockUntil > Date.now() && passTabId != null) {
+    await setExemptTab(passTabId);
+    await chrome.alarms.create(REBLOCK_ALARM, { when: unlockUntil });
     await chrome.alarms.create(TICK_ALARM, { periodInMinutes: 1 });
     await updateBadge();
   } else {
-    await block({ reloadOpenTabs: false });
+    await block({ reloadPassTab: false });
   }
 }
 
 chrome.runtime.onInstalled.addListener(sync);
-chrome.runtime.onStartup.addListener(() => block({ reloadOpenTabs: false }));
+// A new browser session: session rules are already gone, so start clean.
+chrome.runtime.onStartup.addListener(() => block({ reloadPassTab: false }));
 
-// Any tab that visits a blocked site during a pass joins the pass.
-chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
-  const url = info.url || tab.url;
-  if (!url || (await getUnlockUntil()) <= Date.now()) return;
-  if (!(await isBlockedUrl(url))) return;
-  const tabs = await getPassTabs();
-  if (!tabs.includes(tabId)) await chrome.storage.local.set({ passTabs: [...tabs, tabId] });
-});
-
-// Closing the last tab of the pass ends it early — a new tab is blocked again.
+// Closing the tab ends the pass.
 chrome.tabs.onRemoved.addListener(async (tabId) => {
-  if ((await getUnlockUntil()) <= Date.now()) return;
-  const tabs = await getPassTabs();
-  if (!tabs.includes(tabId)) return;
-  const remaining = tabs.filter((id) => id !== tabId);
-  if (remaining.length) await chrome.storage.local.set({ passTabs: remaining });
-  else await block();
+  const { unlockUntil, passTabId } = await getState();
+  if (unlockUntil > Date.now() && tabId === passTabId) {
+    await block({ reloadPassTab: false });
+  }
 });
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
@@ -146,30 +139,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         let tabId = sender.tab?.id;
         if (tabId == null) {
           const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
-          tabId = active?.id;
+          tabId = active?.id ?? null;
         }
-        const until = await unlock(msg.minutes || DEFAULT_MINUTES, tabId ?? null);
-        sendResponse({ ok: true, unlockUntil: until });
+        const until = await unlock(msg.minutes || DEFAULT_MINUTES, tabId);
+        sendResponse(until ? { ok: true, unlockUntil: until } : { ok: false, error: "no tab" });
         break;
       }
       case "block":
         await block();
         sendResponse({ ok: true, unlockUntil: 0 });
         break;
-      case "status":
-        sendResponse({
-          ok: true,
-          unlockUntil: await getUnlockUntil(),
-          sites: await getSites(),
-          minutes: DEFAULT_MINUTES
-        });
+      case "status": {
+        const { unlockUntil } = await getState();
+        sendResponse({ ok: true, unlockUntil, sites: await getSites(), minutes: DEFAULT_MINUTES });
         break;
+      }
       case "setSites": {
         const sites = (msg.sites || [])
           .map((s) => s.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, ""))
           .filter(Boolean);
         await chrome.storage.local.set({ sites: sites.length ? sites : DEFAULT_SITES });
-        if ((await getUnlockUntil()) <= Date.now()) await applyBlocking(true);
+        await installBlockRule();
+        const { unlockUntil, passTabId } = await getState();
+        if (unlockUntil > Date.now() && passTabId != null) await setExemptTab(passTabId);
         sendResponse({ ok: true, sites: await getSites() });
         break;
       }

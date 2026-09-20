@@ -4,8 +4,8 @@ A small Chrome extension that blocks Instagram and YouTube — with a **hold-to-
 
 - Blocked sites redirect to a local "Not right now." page (subdomains included: `www.`, `m.`, `music.youtube.com`, …).
 - To get through, you **press and hold the button for 10 seconds**. Let go early and nothing happens.
-- The pass lasts 7 minutes. The toolbar badge counts down (`6m`, `5m`…).
-- **Closing the tab ends the pass immediately** — open a new Instagram tab and you're blocked again, even with minutes left on the clock.
+- The pass lasts 7 minutes and **belongs to one tab only**. Every other tab stays blocked, including a new tab you open during the pass — so a pass can't quietly spread across the browser.
+- **Closing that tab ends the pass immediately** — open Instagram again and you're back at the block page, even with minutes left on the clock.
 - When the 7 minutes expire the block returns automatically, and any still-open tabs on those sites are reloaded back to the block page — so you can't stretch the pass by leaving a tab sitting open.
 - Restarting Chrome ends any pass in progress.
 - Only top-level page loads are blocked, so embedded YouTube players on other sites still work.
@@ -26,7 +26,7 @@ Blocking starts immediately. To update later: `git pull` in the folder, then hit
 
 ## Using it
 
-**Hitting a blocked site** — you get the block page. Hold the button for 10 seconds to unlock, and you're sent straight on to the page you originally wanted. The pass belongs to that tab: close it and the block is back, so the way out is simply to close the tab when you're done.
+**Hitting a blocked site** — you get the block page. Hold the button for 10 seconds to unlock, and you're sent straight on to the page you originally wanted. The pass covers that one tab: close it and the block is back, so the way out is simply to close the tab when you're done. A link that opens in a *new* tab will hit the block page — that's deliberate.
 
 **The toolbar popup** — shows time remaining, lets you start a pass from anywhere (same 10-second hold), end a pass early with **Block now**, and edit the site list.
 
@@ -45,7 +45,11 @@ Reload the extension in `chrome://extensions` after editing.
 
 ## How it works
 
-`background.js` registers one dynamic [declarativeNetRequest](https://developer.chrome.com/docs/extensions/reference/api/declarativeNetRequest) rule that redirects `main_frame` navigations matching the blocked domains to `blocked.html`, passing the original URL along so it can be restored after unlocking. Unlocking removes the rule, records the tab the pass belongs to, and sets a `chrome.alarms` timer. The rule comes back when the alarm fires or when the last tab holding the pass is closed (`tabs.onRemoved`), whichever happens first. Tabs that visit a blocked site during a pass join it, so a post opened in a new tab keeps working until you've closed them all. The service worker re-asserts the correct state on startup and whenever it wakes.
+`background.js` keeps one dynamic [declarativeNetRequest](https://developer.chrome.com/docs/extensions/reference/api/declarativeNetRequest) rule permanently installed: `main_frame` navigations matching the blocked domains are redirected to `blocked.html`, with the original URL passed along so it can be restored after unlocking.
+
+A pass never removes that rule. It adds a higher-priority **session** rule with an `allow` action and a `tabIds` condition naming the single tab that earned the pass. Everything else keeps hitting the redirect. The exemption comes down when the `chrome.alarms` timer fires or when that tab is closed (`tabs.onRemoved`), whichever is first, and session rules are dropped by Chrome at browser restart anyway.
+
+Scoping the exemption instead of lifting the block is what makes this hard to get wrong: there is no window in which the whole browser is unblocked, so a missed event or a sleeping service worker can at worst leave one already-closed tab exempt. The service worker re-asserts the correct state on startup and whenever it wakes.
 
 ## Honest limitations
 
