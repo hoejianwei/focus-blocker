@@ -10,6 +10,8 @@ A small Chrome extension that blocks Instagram and YouTube — with a **hold-to-
 - Restarting Chrome ends any pass in progress.
 - Only top-level page loads are blocked, so embedded YouTube players on other sites still work.
 
+Works on **Chrome and Microsoft Edge**, on **macOS and Windows** — the same folder, no separate build. Edge is Chromium underneath and runs this Manifest V3 extension unchanged. (Internet Explorer can't: it was retired in 2022 and never had this extension model.)
+
 ## Install (each computer)
 
 Chrome doesn't allow installing extensions from a URL, so you load the folder directly. Takes about a minute.
@@ -24,6 +26,24 @@ Chrome doesn't allow installing extensions from a URL, so you load the folder di
 
 Blocking starts immediately.
 
+### Windows
+
+Same five steps, with these differences:
+
+- **Where to put the folder.** Somewhere permanent like `C:\Users\<you>\focus-blocker` — *not* Downloads, and not a folder you sync and later move. The browser reads the extension from this exact path on every launch; move or delete it and the extension breaks.
+  ```powershell
+  git clone https://github.com/hoejianwei/focus-blocker.git $env:USERPROFILE\focus-blocker
+  ```
+  No Git on that machine? Download the ZIP, then **right-click → Properties → Unblock** before extracting, and make sure you select the inner folder — the one with `manifest.json` directly inside, not a wrapper folder of the same name.
+- **Load unpacked** opens a folder picker: select the folder itself, don't open it and pick a file.
+
+### Microsoft Edge
+
+- Go to `edge://extensions` instead of `chrome://extensions`.
+- **Developer mode** is a toggle in the **bottom left** of that page, not the top right.
+- **Load unpacked** then works the same way. The extension page, popup, countdown badge and 10-second hold all behave identically.
+- Keep the two independent: installing it in Edge doesn't affect Chrome, so if you use both browsers, install it in both — otherwise the other one is an open door.
+
 ## Updating — read this, it's the one real trap
 
 After changing the files (`git pull`, or editing them yourself), **Chrome will keep running the old version until you explicitly reload the extension**:
@@ -34,8 +54,8 @@ That's the card's own arrow, not the browser's page-reload button.
 
 Two things that look like they should work but don't:
 
-- **Closing the Chrome window is not quitting Chrome.** On macOS the process keeps running in the dock, so reopening a window reloads nothing. A real restart is **⌘Q**, then launch again.
-- Quitting and relaunching only helps if it was a genuine quit. When in doubt, use the refresh arrow — it always works.
+- **Closing the window is not always quitting the browser.** On macOS the process keeps running in the dock, so reopening a window reloads nothing — a real restart is **⌘Q**, then launch again. On Windows closing the last window usually does quit, *unless* "Continue running background apps when Google Chrome is closed" is on in Settings → System, in which case Chrome lives on in the notification area and you need **Exit** from its tray icon, or Task Manager.
+- Quitting and relaunching only helps if it was a genuine quit. When in doubt, use the refresh arrow — it always works, on every platform.
 
 A stale build is easy to mistake for a broken one: the extension sits there looking installed while enforcing an older version's behaviour, or, if the old version happened to have its rule lifted for a pass, enforcing nothing at all.
 
@@ -95,14 +115,25 @@ await chrome.storage.local.get()                            // unlockUntil, pass
 
 An empty array from `getDynamicRules()` means nothing is being blocked at the network layer. Any rule-installation failure is logged there and kept in `lastRuleError`.
 
-**Checking from outside Chrome.** Chrome records the running registration in its profile data, which is the ground truth about which build is loaded:
+**Checking from outside the browser.** It records the running registration in its profile data, which is the ground truth about which build is loaded.
+
+macOS:
 
 ```sh
 python3 -c "import json;d=json.load(open('$HOME/Library/Application Support/Google/Chrome/Default/Secure Preferences'));
 print([(v.get('service_worker_registration_info'),v.get('serviceworkerevents')) for v in d['extensions']['settings'].values() if 'focus-blocker' in str(v.get('path',''))])"
 ```
 
-If the version there is behind `manifest.json`, Chrome has not re-read the folder — reload the extension. The service worker re-asserts the correct state on startup and whenever it wakes.
+Windows (PowerShell) — swap in `Microsoft\Edge` for `Google\Chrome` to check Edge:
+
+```powershell
+$p = "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Secure Preferences"
+(Get-Content $p -Raw | ConvertFrom-Json).extensions.settings.PSObject.Properties |
+  Where-Object { $_.Value.path -like "*focus-blocker*" } |
+  ForEach-Object { $_.Value.service_worker_registration_info; $_.Value.serviceworkerevents }
+```
+
+If the version there is behind `manifest.json`, the browser has not re-read the folder — reload the extension. If `serviceworkerevents` is missing `tabs.onUpdated`, you are on a build older than 1.1.0. The service worker re-asserts the correct state on startup and whenever it wakes.
 
 ## Honest limitations
 
